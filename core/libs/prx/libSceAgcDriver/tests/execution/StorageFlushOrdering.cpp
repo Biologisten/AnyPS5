@@ -177,6 +177,27 @@ void RunWriterInsideLayer(AgcDriver::VulkanDevice& device, const GuestBlock& gue
     Require(words[FarDword] == Stored, what + "the pending image's texel away from the newer fill was not stored");
 }
 
+void RunFillOverWriterInFlight(AgcDriver::VulkanDevice& device, const GuestBlock& guest, std::size_t offset) {
+    const std::string what = "storage flush ordering, fill over images whose writer is in flight: ";
+    if (!device.CanWaitUnlocked()) {
+        std::puts("the recorder cannot wait for the GPU without running completions: the in-flight fill case is skipped");
+        return;
+    }
+    const auto* words = guest.Words() + offset / 4u;
+    const auto first = StoreImage(device, guest, offset);
+    static_cast<void>(StoreImage(device, guest, offset + ImageBytes));
+    std::uint64_t serial = 0;
+    {
+        std::lock_guard gpu(AgcDriver::GuestMemory::GpuMutex());
+        serial = device.SubmitAndEpoch();
+    }
+    device.WaitRecorded(serial);
+    Fill(device, first + ImageBytes - 16u, 32u, what);
+    device.WaitIdle();
+    Require(words[ImageBytes / 4u - 1u] == Filled, what + "the fill did not overwrite the first image's last texel");
+    Require(words[ImageBytes / 4u] == Filled, what + "the fill did not overwrite the second image's first texel");
+}
+
 void RunShadowedUnitUnderWriter(AgcDriver::VulkanDevice& device, const GuestBlock& guest) {
     const std::string what = "storage flush ordering, shadowed unit under a writer outside the flushed image's layers: ";
     if (!AgcDriver::Graphics::UnitShadowEnabled()) {
@@ -240,6 +261,7 @@ int main() {
         Run(*device, guest, BlockBytes / 2u, false, "writer in the open batch");
         RunWriterOutsideLayers(*device, guest, BlockBytes / 4u);
         RunWriterInsideLayer(*device, guest, 3u * BlockBytes / 4u);
+        RunFillOverWriterInFlight(*device, guest, 5u * BlockBytes / 8u);
         GuestBlock shadowed(watched);
         RunShadowedUnitUnderWriter(*device, shadowed);
         std::puts("storage flush ordering tests passed");

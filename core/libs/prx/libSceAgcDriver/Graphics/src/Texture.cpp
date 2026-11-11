@@ -4939,7 +4939,8 @@ bool StorageTexture::FlushPending(std::uint64_t address, std::size_t bytes, cons
         flushFailureFiredForTest.store(GpuOrderedFlush() ? 2 : 1, std::memory_order_release);
         throw std::runtime_error("StorageTexture::FlushPending: injected failure for a test");
     }
-    if (auto* recorder = Recorder::Active(); !orderedSkip && recorder != nullptr && !Recorder::InCompletion()) {
+    const bool fillReason = reason != nullptr && std::strcmp(reason, "buffer fill") == 0;
+    if (auto* recorder = Recorder::Active(); !orderedSkip && recorder != nullptr && !Recorder::InCompletion() && !fillReason) {
         try {
             static const bool wholeRange = std::getenv("APS5_FLUSH_WAIT_WHOLE_RANGE") != nullptr;
             const bool publishes = !wholeRange && scope != PublishScope::None;
